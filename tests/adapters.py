@@ -9,6 +9,14 @@ import numpy.typing as npt
 import torch
 from torch import Tensor
 
+import sys
+parent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+sys.path.append(parent_dir)
+import cs336_basics.train_bpe
+
+'''
+run uv with /zfs/home/users/zyliu/.local/bin/uv
+'''
 
 
 def run_linear(
@@ -588,4 +596,11 @@ def run_train_bpe(
                 representing that <token1> was merged with <token2>.
                 Merges are ordered by order of creation.
     """
-    raise NotImplementedError
+    num_processes = kwargs.get("num_processes_pret", 1)
+    num_chunks = kwargs.get("num_chunks_pret", 1)
+    vocab, merges = cs336_basics.train_bpe.train_bpe(input_path=input_path,
+                                                     num_processes_pret=num_processes,
+                                                     num_chunks_pret=num_chunks,
+                                                     vocab_size=vocab_size,
+                                                     special_tokens=special_tokens)
+    return vocab, merges
