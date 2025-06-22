@@ -1,3 +1,8 @@
+'''
+BOTTLENECK: Recounting the frequencies in each cycle
+TODO: Optimization for BPE merge iterations for new merges
+'''
+
 import sys, os
 sys.path.append(os.path.abspath(os.path.dirname(__file__) + "/.."))
 sys.path.append("/zfs/home/users/zyliu/RubymineProjects/LLMfromScratchBasicsImplement/cs336_basics")
@@ -115,6 +120,9 @@ def BPE_merge_one_step(
              merge_tuple, flagging which two consecutive pair of tokens are merged. If none, return None
     '''
     pair_freq_counter = Counter()
+
+    ### TODO: Optimization plan
+    ###     make pair_freq_counter function input and update it in the upper level iteration
 
     # find frequencies of all consecutive pairs of tokens
     for key in token_freq_counter:
