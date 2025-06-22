@@ -1,12 +1,14 @@
+import sys, os
+sys.path.append(os.path.abspath(os.path.dirname(__file__) + "/.."))
+sys.path.append("/zfs/home/users/zyliu/RubymineProjects/LLMfromScratchBasicsImplement/cs336_basics")
+
 import regex as re
-import os
-import cProfile
+
+from cs336_basics.utils import profile
 import itertools
-import sys
 
 from cs336_basics.pretokenization_example import find_chunk_boundaries_listspecials
 
-sys.path.append("/zfs/home/users/zyliu/RubymineProjects/LLMfromScratchBasicsImplement/cs336_basics")
 from pretokenization_example import find_chunk_boundaries
 # alternative, use relative path with from .pretokenization_example import find_chunk_boundaries
 import multiprocessing as mp
@@ -62,7 +64,8 @@ def pre_tokenize(
     file_path: str,
     num_processes: int,
     desirable_num_chunks: int,
-    special_tokens: list = [SPECIAL_TOKENS]
+    special_tokens: list = [SPECIAL_TOKENS],
+    profiling: bool = False,
 ) -> Counter:
     '''
     Update: Currently tested for len(special_tokens) = 1
@@ -81,13 +84,13 @@ def pre_tokenize(
             data_chunk_boundaries = find_chunk_boundaries_listspecials(file, desirable_num_chunks, [special_tokens[i].encode('utf-8') for i in range(len(special_tokens))])
     tasks = [(file_path, start, end, special_tokens) for start, end in zip(data_chunk_boundaries[:-1], data_chunk_boundaries[1:])]
     pretoken_counts = Counter()
-    if num_processes == 1:
+    if num_processes == 1 or profiling:
         for task in tqdm(tasks):
             chunk_pretoken_counter = chunk_pretokenize(*task)
             pretoken_counts.update(chunk_pretoken_counter)
     else:
         with mp.Pool(num_processes) as pool:
-            with tqdm(total=len(tasks)) as pbar:
+            with tqdm(total=len(tasks), desc=f'pretokenize for text chunks, total={desirable_num_chunks}') as pbar:
                 def update_pretoken_dict(chunk_counts: Counter) -> None:
                     pretoken_counts.update(chunk_counts)
                     pbar.update(1)
@@ -98,9 +101,11 @@ def pre_tokenize(
                 pool.join()
     return pretoken_counts
 
+
+# @profile
 def BPE_merge_one_step(
     token_freq_counter: Counter[tuple[bytes], int],
-    merge_threshold: int = MERGE_THRESHOLD
+    merge_threshold: int = MERGE_THRESHOLD,
 ) -> (Counter, tuple | None):
     '''
     Merge the most frequent consecutive pair of tokens
@@ -155,10 +160,18 @@ def BPE_merge_one_step(
 
         # update the token_freq_counter with the merged version for keys
         swaps.append(tuple([tuple(merged), key]))
+
     for swap in swaps:
         token_freq_counter[swap[0]] = token_freq_counter.pop(swap[1])
 
     return token_freq_counter, merge_pair
+
+# @profile  # Used by line_profiler (via kernprof)
+def linePrf_BPE_merge_one_step(
+    token_freq_counter: Counter[tuple[bytes], int],
+    merge_threshold: int = MERGE_THRESHOLD,
+) -> (Counter, tuple | None):
+    return BPE_merge_one_step(token_freq_counter, merge_threshold)
 
 def BPE_train_from_pretoken_counts(
     pretoken_counts: Counter[str, int],
@@ -176,11 +189,11 @@ def BPE_train_from_pretoken_counts(
                         representing that <token1> was merged with <token2>. The merges should be ordered by the order of creation.
     '''
     token_frequencies = pretoken_counts
-    vocab_list = [bytes([i]) for i in range(256)]
-    vocab_list.extend([bytes(special_tokens[i].encode('utf-8')) for i in range(len(special_tokens))])
+    vocab_list = [bytes([i]) for i in range(256)] + [bytes(special_tokens[i].encode('utf-8')) for i in range(len(special_tokens))]
     vocab_dict = {i: item for i, item in enumerate(vocab_list)}
     position = len(vocab_list)
     merges = list()
+    pbar = tqdm(total=target_vocab_size - position, desc=f'Extending vocabulary list to size={target_vocab_size}')
 
     while len(vocab_dict) < target_vocab_size:
         # assert len(vocab_list) == position, 'BPE_train_from_pretoken_counts: merge results in duplicated tokenizer vocabulary.'
@@ -196,7 +209,7 @@ def BPE_train_from_pretoken_counts(
         vocab_dict[position] = BPE_new_token
         position += 1
         merges.append((pair1, pair2,))
-
+        pbar.update(1)
     return vocab_dict, merges
 
 def train_bpe(
@@ -205,6 +218,7 @@ def train_bpe(
         num_chunks_pret: int = 1,
         vocab_size: int = VOCAB_SIZE,
         special_tokens: list[str] = [SPECIAL_TOKENS],
+        profiling: bool = False
 ) -> (dict[int, bytes], list[tuple[bytes, bytes]]):
     '''
     Trains a BPE model, returning a vocabulary, mapping from int (token ID in the vocabulary) to the byte string, and the merges produced from training, in the same order in which they were merged.
@@ -214,14 +228,25 @@ def train_bpe(
     :return vocab: dict[int, bytes], the tokenizer vocabulary, a mapping from int (token ID in the vocabulary) to bytes (token bytes)
             mergers: list[tuple[bytes, bytes]], a list of BPE merges produced from training, in the order of creation.
     '''
-    pretoken_counts = pre_tokenize(input_path, num_processes_pret, num_chunks_pret, special_tokens)
+    pretoken_counts = pre_tokenize(input_path, num_processes_pret, num_chunks_pret, special_tokens, profiling)
     vocab_dict, merges = BPE_train_from_pretoken_counts(pretoken_counts, vocab_size, special_tokens)
     return vocab_dict, merges
 
+@profile(output_path="bpe_profile.prof", sort_by="cumtime", print_top_n=30) # using CProfiling
+def profile_train_bpe(
+        input_path: str,
+        num_processes_pret: int = 1,
+        num_chunks_pret: int = 1,
+        vocab_size: int = VOCAB_SIZE,
+        special_tokens: list[str] = [SPECIAL_TOKENS]
+) -> (dict[int, bytes], list[tuple[bytes, bytes]]):
+    vocab, merges = train_bpe(input_path, num_processes_pret, num_chunks_pret, vocab_size, special_tokens, profiling=True)
+    print(f"Vocab size: {len(vocab)}")
 
 if '__name__' == '__main__':
     # initial_counter = {(b'l', b'o', b'w'): 5, (b'l', b'o', b'w',b'e',b'r'): 2, (b'w', b'i', b'd', b'e', b's', b't'): 3,  (b'n', b'e', b'w', b'e', b's', b't'): 6}
-    pass
+    input_file = '/zfs/home/users/zyliu/RubymineProjects/LLMfromScratchBasicsImplement/data/TinyStoriesV2-GPT4-valid.txt'
+    train_bpe(input_file)
 
 
 
