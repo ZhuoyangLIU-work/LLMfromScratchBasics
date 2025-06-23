@@ -1,6 +1,10 @@
 '''
 BOTTLENECK: Recounting the frequencies in each cycle
 TODO: Optimization for BPE merge iterations for new merges
+TODO: Optimization for pretokenization by directly read and process bytes
+    Currently, pretokeization reads .txt into str with bytes.decode('utf-8') and then transforms it into bytes again during tokenization
+TODO: Optimization for pretokenization by reducing number of fileIO operations
+    Currently, pretokenization generates a new fileIO for every chunk of text
 '''
 
 import sys, os
@@ -12,9 +16,9 @@ import regex as re
 from cs336_basics.utils import profile
 import itertools
 
-from cs336_basics.pretokenization_example import find_chunk_boundaries_listspecials
+from cs336_basics.pretokenization_seekbdry import find_chunk_boundaries_listspecials
 
-from pretokenization_example import find_chunk_boundaries
+from pretokenization_seekbdry import find_chunk_boundaries
 # alternative, use relative path with from .pretokenization_example import find_chunk_boundaries
 import multiprocessing as mp
 from typing import BinaryIO
@@ -30,12 +34,29 @@ MERGE_THRESHOLD = 0
 VOCAB_SIZE = 10000
 PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
 
+def string_pretokenize(
+        string: str,
+        special_token_pattern: re.Pattern) -> Counter[tuple[bytes,...]]:
+    assert isinstance(string, str), f'string_pretokenize:: expecting a string, got an {type(string)} instead'
+
+    # 1) strip out all special tokens
+    cleaned_chunk = re.split(special_token_pattern, string) if len(special_token_pattern) > 0 else []
+
+    # 2) use PAT to map out pre-tokenization vocabulary
+    pieces_matches = [re.finditer(PAT, piece) for piece in cleaned_chunk]
+    string_pretoken_counter = Counter()
+    for piece_matches in pieces_matches:
+        for match in piece_matches:
+            # Each character byte is wrapped into a separate 1-byte token for BPE granularity
+            token = tuple(bytes([b]) for b in bytes(match.group(0).encode("utf-8")))
+            string_pretoken_counter[token] += 1
+    return string_pretoken_counter, pieces_matches
 
 def chunk_pretokenize(
         file_path: str,
         start: int,
         next_start: int,
-        special_tokens: list = [SPECIAL_TOKENS]
+        special_token_pattern: re.Pattern
 ) -> Counter[tuple[bytes, ...]]:
     '''
     This function pre-tokenizes a designated chunk of a file of bytestring.
@@ -49,23 +70,10 @@ def chunk_pretokenize(
     with open(file_path, "rb") as file:
         file.seek(start)
         full_chunk = file.read(next_start-start).decode('utf-8', errors='ignore')
+    chunk_pretokenized_counter, _ = string_pretokenize(full_chunk, special_token_pattern)
+    return chunk_pretokenized_counter
 
-    # strip out all special tokens
-    escaped = [re.escape(tok) for tok in special_tokens]
-    cleaned_chunk = re.split('|'.join(escaped), full_chunk) if len(special_tokens)>0 else [full_chunk]
-
-    # use PAT to map out pre-tokenization vocabulary
-    pieces_matches = [re.finditer(PAT, piece) for piece in cleaned_chunk]
-    chunk_pretoken_counter = Counter()
-    for piece_matches in pieces_matches:
-        for match in piece_matches:
-            # Each character byte is wrapped into a separate 1-byte token for BPE granularity
-            token = tuple(bytes([b]) for b in bytes(match.group(0).encode("utf-8")))
-            chunk_pretoken_counter[token] += 1
-    return chunk_pretoken_counter
-
-
-def pre_tokenize(
+def file_pretokenize(
     file_path: str,
     num_processes: int,
     desirable_num_chunks: int,
@@ -83,11 +91,14 @@ def pre_tokenize(
 
     # find boundaries to split the data feeding to each thread
     with open(file_path, "rb") as file:
-        if len(special_tokens) == 1:
-            data_chunk_boundaries = find_chunk_boundaries(file, desirable_num_chunks, special_tokens[0].encode('utf-8'))
-        else:
-            data_chunk_boundaries = find_chunk_boundaries_listspecials(file, desirable_num_chunks, [special_tokens[i].encode('utf-8') for i in range(len(special_tokens))])
-    tasks = [(file_path, start, end, special_tokens) for start, end in zip(data_chunk_boundaries[:-1], data_chunk_boundaries[1:])]
+        # if len(special_tokens) == 1:
+        #     data_chunk_boundaries = find_chunk_boundaries(file, desirable_num_chunks, special_tokens[0].encode('utf-8'))
+        # else:
+        data_chunk_boundaries = find_chunk_boundaries_listspecials(file, desirable_num_chunks, [special_token.encode('utf-8') for special_token in special_tokens])
+
+    # this pattern is stored in str (CANNOT use re.compile) as the file reader returns str
+    special_tokens_pattern = '|'.join([re.escape(tok) for tok in special_tokens])
+    tasks = [(file_path, start, end, special_tokens_pattern) for start, end in zip(data_chunk_boundaries[:-1], data_chunk_boundaries[1:])]
     pretoken_counts = Counter()
     if num_processes == 1 or profiling:
         for task in tqdm(tasks):
@@ -236,7 +247,7 @@ def train_bpe(
     :return vocab: dict[int, bytes], the tokenizer vocabulary, a mapping from int (token ID in the vocabulary) to bytes (token bytes)
             mergers: list[tuple[bytes, bytes]], a list of BPE merges produced from training, in the order of creation.
     '''
-    pretoken_counts = pre_tokenize(input_path, num_processes_pret, num_chunks_pret, special_tokens, profiling)
+    pretoken_counts = file_pretokenize(input_path, num_processes_pret, num_chunks_pret, special_tokens, profiling)
     vocab_dict, merges = BPE_train_from_pretoken_counts(pretoken_counts, vocab_size, special_tokens)
     return vocab_dict, merges
 

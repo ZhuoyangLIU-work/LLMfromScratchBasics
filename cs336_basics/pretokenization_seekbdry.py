@@ -55,13 +55,13 @@ def find_chunk_boundaries(
 def find_chunk_boundaries_listspecials(
         file: BinaryIO,
         desired_num_chunks: int,
-        split_special_tokens: list
+        split_special_tokens: list[bytes]
 ) -> list[int]:
     """
     Chunk the file into parts that can be counted independently.
     May return fewer chunks if the boundaries end up overlapping.
     """
-    assert isinstance(split_special_token, bytes), (
+    assert isinstance(split_special_tokens[0], bytes), (
         "Must represent special token as a bytestring"
     )
 
@@ -89,9 +89,9 @@ def find_chunk_boundaries_listspecials(
             if mini_chunk == b"":
                 chunk_boundaries[bi] = file_size
                 break
-
+            # print('chunk_bdries:: 1')
             # Find the special token in the mini chunk
-            specials = "|".join(re.escape(special_token) for special_token in split_special_tokens)
+            specials = re.compile(b"|".join(re.escape(special) for special in split_special_tokens))
             match = re.search(specials, mini_chunk)
             if match is not None:
                 chunk_boundaries[bi] = initial_position + match.start()
