@@ -48,7 +48,7 @@ def string_pretokenize(
     for piece_matches in pieces_matches:
         for match in piece_matches:
             # Each character byte is wrapped into a separate 1-byte token for BPE granularity
-            token = tuple(bytes([b]) for b in bytes(match.group(0).encode("utf-8")))
+            token = tuple(bytes([b]) for b in match.group(0).encode("utf-8"))
             string_pretoken_counter[token] += 1
     return string_pretoken_counter, pieces_matches
 
@@ -88,7 +88,7 @@ def file_pretokenize(
     :param special_tokens:
     :return:
     '''
-
+    special_tokens = sorted(special_tokens, reverse=True)
     # find boundaries to split the data feeding to each thread
     with open(file_path, "rb") as file:
         # if len(special_tokens) == 1:
@@ -132,8 +132,6 @@ def BPE_merge_one_step(
     '''
     pair_freq_counter = Counter()
 
-    ### TODO: Optimization plan
-    ###     make pair_freq_counter function input and update it in the upper level iteration
 
     # find frequencies of all consecutive pairs of tokens
     for key in token_freq_counter:
@@ -193,7 +191,7 @@ def linePrf_BPE_merge_one_step(
     return BPE_merge_one_step(token_freq_counter, merge_threshold)
 
 def BPE_train_from_pretoken_counts(
-    pretoken_counts: Counter[str, int],
+    pretoken_counts: Counter[tuple[bytes], int],
     target_vocab_size: int = VOCAB_SIZE,
     special_tokens: list = [SPECIAL_TOKENS],
     merge_threshold: int = MERGE_THRESHOLD,
