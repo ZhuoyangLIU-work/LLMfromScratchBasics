@@ -1,5 +1,4 @@
 from collections import defaultdict
-
 import numpy as np
 import jax
 from functools import partial
@@ -8,7 +7,8 @@ import json, yaml, os
 import regex as re
 from collections.abc import Iterable
 
-
+#TODO: Optimize memory use to pass memory use tests
+#TODO: Complete code comments for full documentation
 
 class Tokenizer:
     '''
@@ -26,9 +26,9 @@ class Tokenizer:
     Methods:
         :method get_attrs
         :method _encode_single_pretoken
-        :method _encode_chunk
+        :method _encode_text_free_of_special_tokens
         :method encode
-
+        :method decode
     '''
     def __init__(self, vocab: dict[int, bytes], merges: list[tuple[bytes, bytes]], special_tokens: list[str] | None = None):
         '''
@@ -49,7 +49,7 @@ class Tokenizer:
         self._special_tokens_pattern = '|'.join(
             [re.escape(tok) for tok in special_tokens]) if special_tokens else ''
         self._vocab_inv = {v: k for k, v in vocab.items()}
-        self._merges_rank = {merges[idx]: idx for idx in range(len(merges))}
+        self._merges_rank = {merge: i for i, merge in enumerate(merges)}
         self._cache_encode = {}  # dict[str, list[int] that matches pretoken strings into corresponding lists of token IDs
 
     def get_attrs(self, attr: str):
@@ -89,8 +89,8 @@ class Tokenizer:
     def _encode_single_pretoken(self, pretoken_repr: tuple[bytes]) -> tuple[bytes]:
         '''
         merge the provided pretoken according to the merge order provided in self._merges
-        :param pretoken_repr:
-        :return:
+        :param pretoken_repr: a tuple of bytes representing one pretoken
+        :return: a tuple of bytes derived by merging the input tuple according to the order as in self._merges
         '''
         while True:
             best_rank , best_idx = np.inf, None
@@ -109,11 +109,11 @@ class Tokenizer:
             new_repr = pretoken_repr[:best_idx] + (pretoken_repr[best_idx] + pretoken_repr[best_idx+1],) + pretoken_repr[best_idx+2:]
             pretoken_repr = new_repr
 
-    def _encode_chunk(self, chunk: str) -> list[int]:
+    def _encode_text_free_of_special_tokens(self, chunk: str) -> list[int]:
         '''
         encode a chunk of string free of special tokens
         :param chunk: a string of text to encode that does not contain any special tokens
-        :return:
+        :return: a list of integer token IDSs
         '''
         if not str: return []
         matches = re.finditer(PAT, chunk)
@@ -129,17 +129,17 @@ class Tokenizer:
             chunk_encoded.extend(pretoken_encoded)
         return chunk_encoded
 
+
     def encode(self, text: str) -> list[int]:
         '''
         Encode an input text into a sequence of token IDs. The input can include special tokens.
-        :param text:
-        :return:
+        :param text: a string to text to encode, can contain special tokens
+        :return: a list of integer token IDSs
         '''
-        # 0) initialization
-        ids = []
         # 1) split string with special tokens
         if not self._special_tokens:
-            return self._encode_chunk(text)
+            return self._encode_text_free_of_special_tokens(text)
+        ids = []
         chunks = re.split('('+self._special_tokens_pattern+')', text)
         ### Use of capturing parenthesis in re.split:
         # s = 'abccccccc<|endoftext|>ddddd'
@@ -155,9 +155,10 @@ class Tokenizer:
             if chunk.encode('utf-8') in self._vocab_inv:
                 ids.append(self._vocab_inv[chunk.encode('utf-8')])
             else:
-                chunk_encoding = self._encode_chunk(chunk)
+                chunk_encoding = self._encode_text_free_of_special_tokens(chunk)
                 ids.extend(chunk_encoding)
         return ids
+
 
     def encode_iterable(self, iterable: Iterable[str]) -> list[int]:
         '''
@@ -172,9 +173,10 @@ class Tokenizer:
     def decode(self, ids: list[int]) -> str:
         '''
         Decode a sequence of token IDs into text
-        :param ids:
-        :return:
+        :param ids: a list of token IDs
+        :return: a string that is derived by mapping the token IDs back to the original text
         '''
+        #decode text together to avoid decoding errors induced by splitting 4-byte UTF-8 expression into separately decoded parts
         text_out = b''.join([self._vocab[id] for id in ids]).decode('utf-8', errors='replace')
         return text_out
 
