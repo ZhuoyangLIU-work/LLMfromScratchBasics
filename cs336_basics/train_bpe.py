@@ -24,7 +24,7 @@ import multiprocessing as mp
 from typing import BinaryIO
 from tqdm import tqdm
 from collections import Counter
-
+import logging
 
 '''
 Global variables
@@ -33,6 +33,9 @@ SPECIAL_TOKENS = '<|endoftext|>'
 MERGE_THRESHOLD = 0
 VOCAB_SIZE = 10000
 PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
+# LOOGER = logging.getLogger(__name__)
+# LOOGER.setLevel(logging.INFO)
+# LOOGER.addHandler(logging.FileHandler(filename=f'{__name__}-log.txt', mode='w'))
 
 def string_pretokenize(
         string: str,

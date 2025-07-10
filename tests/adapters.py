@@ -16,7 +16,7 @@ parent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 sys.path.append(parent_dir)
 import cs336_basics.train_bpe
 import cs336_basics.tokenizer
-import cs336_basics.linear
+import cs336_basics.model
 
 import multiprocessing as mp
 
@@ -43,9 +43,9 @@ def run_linear(
     Returns:
         Float[Tensor, "... d_out"]: The transformed output of your linear module.
     """
-    linear_layer = cs336_basics.linear.Linear(d_in, d_out)
-    linear_layer.load_state_dict({'_weights': weights})
-    return linear_layer.forward(in_features)
+    linear_layer = cs336_basics.model.Linear(d_in, d_out)
+    linear_layer.load_state_dict({'weights': weights})
+    return linear_layer(in_features)
 
 
 def run_embedding(
@@ -66,8 +66,9 @@ def run_embedding(
     Returns:
         Float[Tensor, "... d_model"]: Batch of embeddings returned by your Embedding layer.
     """
-
-    raise NotImplementedError
+    embedding = cs336_basics.model.Embedding(vocab_size, d_model)
+    embedding.load_state_dict({'embedding_mtrx': weights})
+    return embedding(token_ids)
 
 
 def run_swiglu(
@@ -99,8 +100,12 @@ def run_swiglu(
     # swiglu.w1.weight.data = w1_weight
     # swiglu.w2.weight.data = w2_weight
     # swiglu.w3.weight.data = w3_weight
-    raise NotImplementedError
-
+    swiglu = cs336_basics.model.SwiGLU(d_model, d_ff)
+    # swiglu.load_state_dict({'w1': w1_weight, 'w2': w2_weight, 'w3': w3_weight})
+    swiglu.w1.load_state_dict({'weights': w1_weight})
+    swiglu.w2.load_state_dict({'weights': w2_weight})
+    swiglu.w3.load_state_dict({'weights': w3_weight})
+    return swiglu(in_features)
 
 def run_scaled_dot_product_attention(
     Q: Float[Tensor, " ... queries d_k"],
@@ -394,7 +399,9 @@ def run_rmsnorm(
         Float[Tensor,"... d_model"]: Tensor of with the same shape as `in_features` with the output of running
         RMSNorm of the `in_features`.
     """
-    raise NotImplementedError
+    rmsnorm = cs336_basics.model.RMSNorm(d_model, eps)
+    rmsnorm.load_state_dict({"scale": weights})
+    return rmsnorm(in_features)
 
 
 def run_silu(in_features: Float[Tensor, " ..."]) -> Float[Tensor, " ..."]:
