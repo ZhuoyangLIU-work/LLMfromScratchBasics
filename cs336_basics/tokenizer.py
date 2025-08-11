@@ -1,7 +1,4 @@
-from collections import defaultdict
 import numpy as np
-import jax
-from functools import partial
 from cs336_basics.train_bpe import string_pretokenize, file_pretokenize, train_bpe, PAT
 import json, yaml, os
 import regex as re

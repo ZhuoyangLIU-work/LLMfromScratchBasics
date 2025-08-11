@@ -14,7 +14,6 @@ sys.path.append("/zfs/home/users/zyliu/RubymineProjects/LLMfromScratchBasicsImpl
 import regex as re
 
 from cs336_basics.utils import profile
-import itertools
 
 from cs336_basics.pretokenization_seekbdry import find_chunk_boundaries_listspecials
 
