@@ -192,6 +192,7 @@ class RoPE(torch.nn.Module):
 class MultiHeadAttention(torch.nn.Module):
     def __init__(self, d_model: int, num_heads: int, position_encoder: RoPE | None = None, device = None, dtype = None):
         assert d_model % num_heads == 0, 'd_model should be divisible by num_heads'
+
         super(MultiHeadAttention, self).__init__()
         self.d_model = d_model
         self.num_heads = num_heads
@@ -209,15 +210,13 @@ class MultiHeadAttention(torch.nn.Module):
 
     def forward(self, x: Float[torch.Tensor, "... seq_len d_model"], token_positions: Int[torch.Tensor, "... seq_len"]|None = None) -> Float[torch.Tensor, "... seq_len h d_k"]:
         *b, seq_len, d_model = x.shape
-        # assert d_model == self.d_model, "input not compatible with Module d_model"
+        assert d_model == self.d_model, "input not compatible with Module d_model"
         query = self.wq(x) # "... seq_len (num_heads dk)"
         key = self.wk(x)
         value = self.wv(x)
 
         query, key, value = (rearrange(T, "... seq_len (h d_k) -> ... h seq_len d_k", h = self.num_heads)
                              for T in [query, key, value])
-
-        # seq_len = seq_len * self.d_k
 
         if self.position_encoder is not None:
 
@@ -238,6 +237,59 @@ class MultiHeadAttention(torch.nn.Module):
         out = self.wout(out)
 
         return out
+
+class TransformerBlock(torch.nn.Module):
+    def __init__(self, d_model: int, num_heads: int, d_ff: int|None = None, rms_eps: float = 1e-5, position_encoder: RoPE|None = None, device = None, dtype = None):
+        super(TransformerBlock, self).__init__()
+        self.d_model = d_model
+        self.num_heads = num_heads
+        self.d_ff = d_ff
+        self.rmsnorm1 = RMSNorm(d_model, eps=rms_eps,device = device, dtype = dtype)
+        self.rmsnorm2 = RMSNorm(d_model, eps=rms_eps,device = device, dtype = dtype)
+        self.multiheadselfattention = MultiHeadAttention(d_model, num_heads, position_encoder = position_encoder, device = device, dtype = dtype)
+        self.ff = SwiGLU(d_model, d_ff, device = device, dtype = dtype)
+
+    def forward(self, x: Float[torch.Tensor, "batch seq hidden"]) -> Float[torch.Tensor, "batch seq hidden"]:
+        y = x + self.multiheadselfattention(self.rmsnorm1(x))
+        out = self.ff(self.rmsnorm2(y))
+        return y + out
+
+
+class TransformerLM(torch.nn.Module):
+    def __init__(self, vocab_size,
+                 context_length,
+                 num_layers,
+                 d_model = 1600,
+                 num_heads = 25,
+                 d_ff: int|None = None,
+                 rms_eps: float = 1e-5,
+                 position_encoder: RoPE|None = None,
+                 device = None,
+                 dtype = None):
+        super(TransformerLM, self).__init__()
+        self.max_seq_len = context_length
+        self.num_embeddings = vocab_size
+        self.num_layers = num_layers
+        self.d_model = d_model
+        self.num_heads = num_heads
+        if d_ff is None:
+            target_dff = FFD_MODEL_DIM_RATIO * self.d_model
+            d_ff = max(1, round(target_dff/HARDWARE_DIGITS)) * HARDWARE_DIGITS
+        self.d_ff = d_ff
+        self.position_encoder = position_encoder
+
+        self.input_embedding = Embedding(self.num_embeddings, self.d_model, device = device, dtype = dtype)
+        self.TMLayers = {f'TransformerBlock_{i}': TransformerBlock(self.d_model, self.num_heads, self.d_ff, rms_eps=rms_eps, position_encoder=self.position_encoder, device=device, dtype=dtype) for i in range(num_layers)}
+        self.rmsnorm = RMSNorm(self.d_model, eps=rms_eps, device = device, dtype = dtype)
+        self.output_embedding = Linear(self.d_model, self.num_embeddings, device = device, dtype = dtype)
+
+    def forward(self, x: Float[torch.Tensor, "batch seq hidden"]) -> torch.Tensor:
+        y = self.input_embedding(x)
+        for i in range(self.num_layers):
+            y = self.TMLayers[f'TransformerBlock_{i}'](y)
+        y = self.rmsnorm(y)
+        y = self.output_embedding(y)
+        return y
 
 
 
